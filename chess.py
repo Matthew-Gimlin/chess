@@ -2,16 +2,6 @@ EMPTY = 0
 
 BOARD_MASK = 0xffffffffffffffff
 
-# Masks for the squares on the board.
-SQUARES = [A1, B1, C1, D1, E1, F1, G1, H1,
-           A2, B2, C2, D2, E2, F2, G2, H2,
-           A3, B3, C3, D3, E3, F3, G3, H3,
-           A4, B4, C4, D4, E4, F4, G4, H4,
-           A5, B5, C5, D5, E5, F5, G5, H5,
-           A6, B6, C6, D6, E6, F6, G6, H6,
-           A7, B7, C7, D7, E7, F7, G7, H7,
-           A8, B8, C8, D8, E8, F8, G8, H8,] = [1 << i for i in range(64)]
-
 # Masks for the ranks on the board.
 RANKS = [RANK_1,
          RANK_2,
@@ -21,6 +11,9 @@ RANKS = [RANK_1,
          RANK_6,
          RANK_7,
          RANK_8,] = [0xff << i for i in range(0, 64, 8)]
+
+# SAN symbols for the ranks on the board.
+RANK_SAN = ['1', '2', '3', '4', '5', '6', '7', '8']
 
 # Masks for the files on the board.
 FILES = [FILE_A,
@@ -32,19 +25,48 @@ FILES = [FILE_A,
          FILE_G,
          FILE_H,] = [0x0101010101010101 << i for i in range(8)]
 
+# SAN symbols for the files on the board.
+FILE_SAN = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+
+# Masks for the squares on the board.
+SQUARES = [A1, B1, C1, D1, E1, F1, G1, H1,
+           A2, B2, C2, D2, E2, F2, G2, H2,
+           A3, B3, C3, D3, E3, F3, G3, H3,
+           A4, B4, C4, D4, E4, F4, G4, H4,
+           A5, B5, C5, D5, E5, F5, G5, H5,
+           A6, B6, C6, D6, E6, F6, G6, H6,
+           A7, B7, C7, D7, E7, F7, G7, H7,
+           A8, B8, C8, D8, E8, F8, G8, H8,] = [1 << i for i in range(64)]
+
+# SAN symbols for the squares on the board.
+SQUARE_SAN = [file + rank for rank in RANK_SAN for file in FILE_SAN]
+
+# Numbers for the piece types.
+PIECES = [PAWN,
+          KNIGHT,
+          BISHOP,
+          ROOK,
+          QUEEN,
+          KING,] = [1, 2, 3, 4, 5, 6]
+
+PIECE_SYMBOLS = ['p', 'n', 'b', 'r', 'q', 'k']
+
+# Numbers for the color types.
+COLORS = [WHITE, BLACK] = [1, 2]
+
 class SanError(ValueError):
     '''
     A SAN parsing error.
     '''
     pass
 
+class FenError(ValueError):
+    '''
+    A FEN parsing error.
+    '''
+    pass
+
 class Square:
-    '''
-    A square on the board.
-    
-    Members:
-        mask (int): A mask for a square on the board.
-    '''
     def __init__(self, mask=EMPTY):
         '''
         Creates a square.
@@ -73,7 +95,7 @@ class Square:
         Returns:
             (bool): If the square is on the board.
         '''
-        return self.mask & BOARD_MASK
+        return self.mask in SQUARES
 
     def to_rank(self):
         '''
@@ -82,13 +104,7 @@ class Square:
         Returns:
             (int): The rank mask of the square.
         '''
-        rank = RANK_1
-        while rank & BOARD_MASK:
-            if self.mask & rank:
-                return rank
-            rank <<= 8
-
-        return EMPTY
+        return next((rank for rank in RANKS if self.mask & rank), EMPTY)
 
     def to_file(self):
         '''
@@ -97,13 +113,7 @@ class Square:
         Returns:
             (int): The file mask of the square.
         '''
-        file = FILE_A
-        while file & BOARD_MASK:
-            if self.mask & file:
-                return file
-            file <<= 1
-
-        return EMPTY
+        return next((file for file in FILES if self.mask & file), EMPTY)
 
     def to_san(self):
         '''
@@ -112,28 +122,13 @@ class Square:
         Returns:
             (str): The SAN of the square.
         '''
-        if not self.on_board():
+        if not self.is_legal():
             return ''
-        
-        san = ''
-        
-        # Get the file.
-        file = FILE_A
-        for file_char in 'abcdefgh':
-            if self.mask & file:
-                san += file_char
-                break
-            file <<= 1
 
-        # Get the rank.
-        rank = RANK_1
-        for rank_char in '12345678':
-            if self.mask & rank:
-                san += rank_char
-                break
-            rank <<= 8
+        # Get the SAN of the square.
+        san_index = SQUARES.index(self.mask)
 
-        return san
+        return SQUARE_SAN[san_index]
 
     @classmethod
     def from_san(cls, san):
@@ -141,35 +136,82 @@ class Square:
         Creates a square from SAN.
 
         Params:
-            san (str): A square in SAN.
+            san (str): SAN for a square.
 
         Returns:
             (chess.Square): The new square.
         '''
-        if len(san) != 2:
-            raise SanError(f'Invalid length {len(san)} (expects 2)')
+        if not san in SQUARE_SAN:
+            raise SanError(f'Invalid square \'{san}\'')
 
-        # Parse the rank and file.
-        san = san.lower()
-        san_file = san[0]
-        san_rank = san[1]
+        # Get the square mask.
+        mask_index = SQUARE_SAN.index(san)
 
-        mask = A1
+        return Square(SQUARES[mask_index])
 
-        # Get the file.
-        for file_char in 'abcdefgh':
-            if file_char == san_file:
-                break
-            mask <<= 1
-        else:
-            raise SanError(f'Invalid file \'{san_rank}\'')
+class Piece:
+    def __init__(self, piece, color):
+        '''
+        Creates a piece.
 
-        # Get the rank.
-        for rank_char in '12345678':
-            if rank_char == san_rank:
-                break
-            mask <<= 8
-        else:
-            raise SanError(f'Invalid rank \'{san_rank}\'')
+        Params:
+            piece (int): A piece type.
+            color (int): A piece color.
 
-        return cls(mask)
+        Returns:
+            (chess.Piece): The new piece.
+        '''
+        self.piece = piece
+        self.color = color
+
+    def __repr__(self):
+        '''
+        Gets a representation of the piece with the symbol.
+
+        Returns:
+            (str): The representation.
+        '''
+        return f'<Piece symbol=\'{self.to_symbol()}\'>'
+
+    def to_symbol(self):
+        '''
+        Gets the symbol for the piece.
+
+        Returns:
+            (str): The symbol.
+        '''
+        if not self.piece in PIECES or not self.color in COLORS:
+            return ''
+
+        # Get the piece symbol.
+        symbol_index = PIECES.index(self.piece)
+        symbol = PIECE_SYMBOLS[symbol_index]
+
+        # White pieces are upper-case.
+        if self.color == WHITE:
+            symbol = symbol.upper()
+
+        return symbol
+
+    @classmethod
+    def from_symbol(cls, symbol):
+        '''
+        Creates a piece from a symbol.
+
+        Params:
+            symbol (str): A symbol.
+
+        Returns:
+            (chess.Piece): The new peice.
+        '''
+        lower_symbol = symbol.lower()
+        
+        if not lower_symbol in PIECE_SYMBOLS:
+            raise FenError(f'Invalid symbol \'{symbol}\'')
+
+        # Get the piece type and color.
+        piece_index = PIECE_SYMBOLS.index(lower_symbol)
+        piece = PIECES[piece_index]
+        color = WHITE if symbol.isupper() else BLACK
+
+        return Piece(piece, color)
